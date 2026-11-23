@@ -7,6 +7,14 @@ AutomataBridge is an interactive web-based application built using Python and St
 
 The application provides an interactive environment for understanding finite state machines and their behavior through transition tables and state diagrams.
 
+## Live Demo
+
+Try AutomataBridge here:
+
+**Live Application:** https://automatabridge.streamlit.app/
+
+**Source Code:** https://github.com/nirbhay2510/AutomataBridge
+
 ## Features
 
 - **Machine Configuration:** Define states, input symbols, output symbols, and initial states.
