@@ -55,7 +55,7 @@ AutomataBridge/
 ### 1. Clone the Repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone https://github.com/nirbhay2510/AutomataBridge.git
 ```
 
 ### 2. Navigate to the Project Directory
@@ -90,7 +90,19 @@ The application will open in your default web browser.
 
 ## Application Screenshots
 
-Screenshots of the application will be added here.
+## Application Screenshots
+
+### Home Page
+![Home Page](screenshots/home.png)
+
+### Transition Table and State Diagram
+![Transition Diagram](screenshots/transition-diagram.png)
+
+### Machine Conversion
+![Machine Conversion](screenshots/conversion.png)
+
+### Summary and Equivalence Testing
+![Summary](screenshots/summary.png)
 
 ## Author
 
