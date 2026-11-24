@@ -3,10 +3,15 @@ import streamlit as st
 from collections import deque
 
 
+# ============================================================
+# MEALY TO MOORE CONVERSION
+# ============================================================
+
 def convert_mealy_to_moore(machine, transitions):
 
     states = machine["states"]
     inputs = machine["inputs"]
+    outputs = machine["outputs"]
     initial_state = machine["initial_state"]
 
     transition_lookup = {
@@ -14,8 +19,53 @@ def convert_mealy_to_moore(machine, transitions):
         for row in transitions
     }
 
-    # Epsilon represents no output before the first input.
-    initial_pair = (initial_state, "ε")
+    if initial_state not in transition_lookup:
+        raise ValueError(
+            f"Initial state '{initial_state}' has no transition row."
+        )
+
+    # Validate transition rows.
+    for state in states:
+
+        if state not in transition_lookup:
+            raise ValueError(
+                f"Missing transition row for state '{state}'."
+            )
+
+        row = transition_lookup[state]
+
+        for symbol in inputs:
+
+            next_col = f"Input {symbol} - Next State"
+            output_col = f"Input {symbol} - Output"
+
+            if next_col not in row or output_col not in row:
+                raise ValueError(
+                    f"Incomplete transition for state '{state}' "
+                    f"and input '{symbol}'."
+                )
+
+            destination = row[next_col]
+            transition_output = str(row[output_col])
+
+            if destination not in states:
+                raise ValueError(
+                    f"Unknown destination state '{destination}'."
+                )
+
+            if transition_output not in outputs:
+                raise ValueError(
+                    f"Unknown output symbol '{transition_output}'."
+                )
+
+    # None is used internally for the initial no-output condition.
+    # This avoids conflicts if epsilon is configured as an output.
+    epsilon = "ε"
+    initial_pair = (initial_state, None)
+
+    # --------------------------------------------------------
+    # STEP 1: FIND REACHABLE STATE-OUTPUT PAIRS
+    # --------------------------------------------------------
 
     reachable_pairs = []
     visited = set()
@@ -40,17 +90,21 @@ def convert_mealy_to_moore(machine, transitions):
                 f"Input {symbol} - Next State"
             ]
 
-            output = row[
-                f"Input {symbol} - Output"
-            ]
+            transition_output = str(
+                row[f"Input {symbol} - Output"]
+            )
 
             next_pair = (
                 destination,
-                output,
+                transition_output
             )
 
             if next_pair not in visited:
                 queue.append(next_pair)
+
+    # --------------------------------------------------------
+    # STEP 2: COLLECT DISTINCT INCOMING OUTPUTS
+    # --------------------------------------------------------
 
     state_outputs = {
         state: []
@@ -59,36 +113,166 @@ def convert_mealy_to_moore(machine, transitions):
 
     for state, output in reachable_pairs:
 
+        if output is None:
+            continue
+
         if output not in state_outputs[state]:
             state_outputs[state].append(output)
 
-    # Rename states only when splitting is required.
-    # If a state has only one output, retain its original name.
+    # Preserve the configured output alphabet order.
+    for state in states:
+
+        state_outputs[state].sort(
+            key=lambda output: (
+                outputs.index(output)
+                if output in outputs
+                else len(outputs)
+            )
+        )
+
+    # --------------------------------------------------------
+    # STEP 3: GENERATE MOORE STATE NAMES
+    # --------------------------------------------------------
+
     state_mapping = {}
+    used_names = set()
+
+    def make_state_name(state, output, split):
+
+        if output is None:
+            base_name = state
+
+        elif split:
+            base_name = f"{state}{output}"
+
+        else:
+            base_name = state
+
+        candidate = base_name
+        counter = 2
+
+        # Avoid duplicate generated state names.
+        while candidate in used_names:
+
+            candidate = f"{base_name}_{counter}"
+            counter += 1
+
+        used_names.add(candidate)
+
+        return candidate
 
     for state in states:
 
-        outputs = state_outputs[state]
+        distinct_outputs = state_outputs[state]
 
-        for index, output in enumerate(outputs):
+        # CASE 1: No incoming output.
+        if not distinct_outputs:
 
-            if len(outputs) == 1:
-                new_state_name = state
-            else:
-                new_state_name = f"{state}{index}"
+            state_mapping[(state, None)] = (
+                make_state_name(
+                    state,
+                    None,
+                    False
+                )
+            )
 
-            state_mapping[
-                (state, output)
-            ] = new_state_name
+        # CASE 2: Only one distinct incoming output.
+        elif len(distinct_outputs) == 1:
+
+            output = distinct_outputs[0]
+
+            state_mapping[(state, output)] = (
+                make_state_name(
+                    state,
+                    output,
+                    False
+                )
+            )
+
+        # CASE 3: Multiple distinct incoming outputs.
+        else:
+
+            for output in distinct_outputs:
+
+                state_mapping[(state, output)] = (
+                    make_state_name(
+                        state,
+                        output,
+                        True
+                    )
+                )
+
+    # --------------------------------------------------------
+    # STEP 4: DETERMINE THE INITIAL MOORE STATE
+    # --------------------------------------------------------
+
+    initial_outputs = state_outputs[initial_state]
+
+    if not initial_outputs:
+
+        # No incoming output:
+        # Keep the original initial state with epsilon.
+
+        converted_initial_state = state_mapping[
+            (initial_state, None)
+        ]
+
+    else:
+
+        # One incoming output:
+        # Keep original state name.
+        #
+        # Multiple incoming outputs:
+        # Select the first output-specific variant according
+        # to the configured output alphabet.
+
+        selected_output = initial_outputs[0]
+
+        converted_initial_state = state_mapping[
+            (initial_state, selected_output)
+        ]
+
+        # Map the initial no-output condition to the selected
+        # variant. No additional A/epsilon state is generated.
+
+        state_mapping[(initial_state, None)] = (
+            converted_initial_state
+        )
+
+    # --------------------------------------------------------
+    # STEP 5: REMOVE EXTRA INITIAL EPSILON PAIR
+    # --------------------------------------------------------
+
+    final_pairs = []
+
+    for state, output in reachable_pairs:
+
+        if (
+            state == initial_state
+            and output is None
+            and initial_outputs
+        ):
+            continue
+
+        final_pairs.append((state, output))
+
+    # --------------------------------------------------------
+    # STEP 6: CREATE CONVERTED MOORE TRANSITION TABLE
+    # --------------------------------------------------------
 
     converted_rows = []
 
-    for state, output in reachable_pairs:
+    for state, output in final_pairs:
+
+        if output is None:
+            display_output = epsilon
+        else:
+            display_output = output
 
         new_row = {
             "State": state_mapping[(state, output)],
             "Original State": state,
-            "Output": output,
+            "Output": display_output,
         }
 
         source_row = transition_lookup[state]
@@ -99,34 +283,58 @@ def convert_mealy_to_moore(machine, transitions):
                 f"Input {symbol} - Next State"
             ]
 
-            transition_output = source_row[
-                f"Input {symbol} - Output"
-            ]
+            transition_output = str(
+                source_row[
+                    f"Input {symbol} - Output"
+                ]
+            )
 
-            new_row[
-                f"Input {symbol}"
-            ] = state_mapping[
-                (destination, transition_output)
-            ]
+            destination_pair = (
+                destination,
+                transition_output
+            )
+
+            if destination_pair not in state_mapping:
+                raise ValueError(
+                    f"Unable to map destination pair "
+                    f"{destination_pair}."
+                )
+
+            new_row[f"Input {symbol}"] = (
+                state_mapping[destination_pair]
+            )
 
         converted_rows.append(new_row)
 
-    reachable_original_states = [
-        state
-        for state in states
-        if state_outputs[state]
-    ]
+    # --------------------------------------------------------
+    # STEP 7: GROUP REACHABLE ORIGINAL STATES
+    # --------------------------------------------------------
+
+    reachable_original_states = list(
+        dict.fromkeys(
+            state
+            for state, _ in final_pairs
+        )
+    )
+
+    # --------------------------------------------------------
+    # STEP 8: RETURN CONVERTED MACHINE
+    # --------------------------------------------------------
 
     return {
         "type": "Moore",
         "rows": converted_rows,
-        "initial_state": state_mapping[initial_pair],
+        "initial_state": converted_initial_state,
         "state_mapping": state_mapping,
         "state_outputs": state_outputs,
         "groups": reachable_original_states,
         "inputs": inputs,
     }
 
+
+# ============================================================
+# MOORE TO MEALY CONVERSION
+# ============================================================
 
 def convert_moore_to_mealy(machine, transitions):
 
@@ -153,6 +361,12 @@ def convert_moore_to_mealy(machine, transitions):
                 f"Input {symbol} - Next State"
             ]
 
+            if destination not in state_outputs:
+                raise ValueError(
+                    f"No output found for destination state "
+                    f"'{destination}'."
+                )
+
             new_row[
                 f"Input {symbol} - Next State"
             ] = destination
@@ -173,6 +387,10 @@ def convert_moore_to_mealy(machine, transitions):
     }
 
 
+# ============================================================
+# OUTPUT EQUIVALENCE CHECK
+# ============================================================
+
 def check_output_equivalence(
     machine,
     original_transitions,
@@ -180,7 +398,7 @@ def check_output_equivalence(
     input_sequence,
 ):
 
-    """Compare original and converted outputs for an input sequence."""
+    """Compare original and converted outputs."""
 
     inputs = machine["inputs"]
 
@@ -191,6 +409,7 @@ def check_output_equivalence(
     ]
 
     if unknown:
+
         raise ValueError(
             "Unknown input symbol(s): "
             + ", ".join(dict.fromkeys(unknown))
@@ -215,25 +434,33 @@ def check_output_equivalence(
     for symbol in input_sequence:
 
         if original_state not in original_lookup:
+
             raise ValueError(
-                f"No transition row exists for state '{original_state}'."
+                f"No transition row exists for state "
+                f"'{original_state}'."
             )
 
         if converted_state not in converted_lookup:
+
             raise ValueError(
-                f"No converted transition row exists for state '{converted_state}'."
+                f"No converted transition row exists for state "
+                f"'{converted_state}'."
             )
 
         original_row = original_lookup[original_state]
         converted_row = converted_lookup[converted_state]
 
+        # ----------------------------------------------------
+        # MEALY TO MOORE
+        # ----------------------------------------------------
+
         if machine["direction"] == "Mealy to Moore":
 
-            original_outputs.append(
-                original_row[
-                    f"Input {symbol} - Output"
-                ]
-            )
+            original_output = original_row[
+                f"Input {symbol} - Output"
+            ]
+
+            original_outputs.append(original_output)
 
             original_state = original_row[
                 f"Input {symbol} - Next State"
@@ -243,9 +470,22 @@ def check_output_equivalence(
                 f"Input {symbol}"
             ]
 
-            converted_outputs.append(
-                converted_lookup[converted_state]["Output"]
-            )
+            if converted_state not in converted_lookup:
+
+                raise ValueError(
+                    f"Converted destination state "
+                    f"'{converted_state}' does not exist."
+                )
+
+            converted_output = converted_lookup[
+                converted_state
+            ]["Output"]
+
+            converted_outputs.append(converted_output)
+
+        # ----------------------------------------------------
+        # MOORE TO MEALY
+        # ----------------------------------------------------
 
         else:
 
@@ -253,15 +493,24 @@ def check_output_equivalence(
                 f"Input {symbol} - Next State"
             ]
 
-            original_outputs.append(
-                result["state_outputs"][original_state]
-            )
+            if original_state not in result["state_outputs"]:
 
-            converted_outputs.append(
-                converted_row[
-                    f"Input {symbol} - Output"
-                ]
-            )
+                raise ValueError(
+                    f"No Moore output exists for state "
+                    f"'{original_state}'."
+                )
+
+            original_output = result[
+                "state_outputs"
+            ][original_state]
+
+            original_outputs.append(original_output)
+
+            converted_output = converted_row[
+                f"Input {symbol} - Output"
+            ]
+
+            converted_outputs.append(converted_output)
 
             converted_state = converted_row[
                 f"Input {symbol} - Next State"
@@ -270,10 +519,16 @@ def check_output_equivalence(
     return {
         "original_outputs": original_outputs,
         "converted_outputs": converted_outputs,
-        "equivalent": original_outputs == converted_outputs,
+        "equivalent": (
+            original_outputs == converted_outputs
+        ),
         "input_sequence": list(input_sequence),
     }
 
+
+# ============================================================
+# OUTPUT EQUIVALENCE TEST UI
+# ============================================================
 
 def render_output_equivalence_test(
     machine,
@@ -284,19 +539,22 @@ def render_output_equivalence_test(
     st.markdown("### Output-equivalence test")
 
     st.caption(
-        "Enter an input sequence to run it on both machines and compare "
-        "their outputs. Separate symbols with commas (for example: 0, 1, 0)."
+        "Enter an input sequence to run it on both machines "
+        "and compare their outputs. Separate symbols with "
+        "commas (for example: 0, 1, 0)."
     )
 
     sequence_text = st.text_input(
         "Input sequence",
-        key=f"equivalence_sequence_{st.session_state.machine_version}",
+        key=f"equivalence_sequence_"
+            f"{st.session_state.machine_version}",
         placeholder="0, 1, 0",
     )
 
     if st.button(
         "Test output equivalence",
-        key=f"run_equivalence_{st.session_state.machine_version}",
+        key=f"run_equivalence_"
+            f"{st.session_state.machine_version}",
         use_container_width=True,
     ):
 
@@ -332,7 +590,8 @@ def render_output_equivalence_test(
         else:
 
             st.error(
-                "The output sequences do not match. Check the conversion logic."
+                "The output sequences do not match. "
+                "Check the conversion logic."
             )
 
         col1, col2 = st.columns(2)
@@ -360,11 +619,15 @@ def render_output_equivalence_test(
         if machine["direction"] == "Mealy to Moore":
 
             st.caption(
-                "The initial Moore-state output is excluded from this "
-                "comparison because the Mealy machine emits no output "
-                "before the first input."
+                "The initial Moore-state output is excluded "
+                "from this comparison because the Mealy "
+                "machine emits no output before the first input."
             )
 
+
+# ============================================================
+# STATE-BY-STATE CONVERSION DETAILS
+# ============================================================
 
 def _render_state_details(
     machine,
@@ -376,29 +639,52 @@ def _render_state_details(
 
         outputs = result["state_outputs"][current_state]
 
-        generated = [
-            result["state_mapping"][
-                (current_state, output)
+        if not outputs:
+
+            generated_state = result["state_mapping"][
+                (current_state, None)
             ]
-            for output in outputs
-        ]
 
-        st.info(
-            f"Original state {current_state} produces "
-            f"{len(generated)} reachable Moore state(s), "
-            "one for each distinct incoming output value, plus ε for "
-            "the initial no-output condition when applicable."
-        )
-
-        for output, generated_state in zip(
-            outputs,
-            generated,
-        ):
-
-            st.markdown(
-                f"- **{generated_state}** — "
-                f"Moore output: `{output}`"
+            st.info(
+                f"Original state {current_state} has no "
+                "reachable incoming output. It remains as "
+                f"{generated_state} with output ε."
             )
+
+        else:
+
+            generated = [
+                result["state_mapping"][
+                    (current_state, output)
+                ]
+                for output in outputs
+            ]
+
+            if len(outputs) == 1:
+
+                st.info(
+                    f"Original state {current_state} has only "
+                    "one distinct incoming output. No splitting "
+                    f"is required. Its Moore state is {generated[0]}."
+                )
+
+            else:
+
+                st.info(
+                    f"Original state {current_state} has "
+                    f"{len(outputs)} distinct incoming outputs. "
+                    "It is split into separate Moore states."
+                )
+
+            for output, generated_state in zip(
+                outputs,
+                generated,
+            ):
+
+                st.markdown(
+                    f"- **{generated_state}** — "
+                    f"Moore output: `{output}`"
+                )
 
         rows = [
             row
@@ -409,8 +695,7 @@ def _render_state_details(
         if rows:
 
             st.caption(
-                "Transitions created for this state's "
-                "generated Moore state(s):"
+                "Transitions created for this original state:"
             )
 
             for row in rows:
@@ -453,6 +738,10 @@ def _render_state_details(
             )
 
 
+# ============================================================
+# CONVERSION WORKSPACE
+# ============================================================
+
 def render_conversion_workspace(
     machine,
     transitions,
@@ -468,42 +757,34 @@ def render_conversion_workspace(
             st.markdown("### Initial Moore state")
 
             st.info(
-                "The initial Moore state is assigned ε (epsilon), meaning "
-                "no output has been produced before the first input. This "
-                "is automatic; you do not need to choose an output. After "
-                "each input, the Moore machine produces the output associated "
-                "with the reached state."
-            )
-
-            if not st.button(
-                "Start conversion",
-                use_container_width=True,
-            ):
-
-                return None
-
-            result = converter(
-                machine,
-                transitions,
+                "The initial Moore state follows the compact "
+                "initial-state convention. If the original "
+                "initial state has incoming outputs, one of "
+                "its output-specific variants is selected as "
+                "the initial state. If it has no incoming "
+                "outputs, it retains ε (epsilon). The initial "
+                "Moore output is excluded when comparing "
+                "output sequences."
             )
 
         else:
 
             st.caption(
-                "The conversion uses the output of each destination state."
+                "The conversion uses the output of each "
+                "destination state."
             )
 
-            if not st.button(
-                "Start conversion",
-                use_container_width=True,
-            ):
+        if not st.button(
+            "Start conversion",
+            use_container_width=True,
+        ):
 
-                return None
+            return None
 
-            result = converter(
-                machine,
-                transitions,
-            )
+        result = converter(
+            machine,
+            transitions,
+        )
 
         st.session_state.conversion_result = result
         st.session_state.conversion_started = True
@@ -575,7 +856,8 @@ def render_conversion_workspace(
         else:
 
             st.caption(
-                "Use Next to reveal the next state's conversion in the diagram."
+                "Use Next to reveal the next state's "
+                "conversion in the diagram."
             )
 
     st.markdown(
