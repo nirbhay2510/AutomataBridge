@@ -14,7 +14,7 @@ from modules.conversion import (
 
 
 st.set_page_config(
-    page_title="Automata Studio",
+    page_title="AutomataBridge",
     page_icon="🔄",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -28,7 +28,7 @@ DEFAULTS = {
     "conversion_result": None,
     "machine_version": 0,
     "edit_transitions": True,
-    "page_navigation": "01 Machine Configuration",
+    "page_navigation": "Machine Configuration",
 }
 
 for key, value in DEFAULTS.items():
@@ -37,9 +37,9 @@ for key, value in DEFAULTS.items():
 
 
 pages = [
-    "01 Machine Configuration",
-    "02 Machine Comparison",
-    "03 Summary",
+    "Machine Configuration",
+    "Machine Comparison",
+    "Summary",
 ]
 
 
@@ -70,11 +70,10 @@ def page_heading(number, heading, description=None):
 st.markdown(
     """
     <div class="hero">
-        <div class="hero-tag">AUTOMATA THEORY · INTERACTIVE SIMULATOR</div>
-        <h1>FINITE STATE MACHINE SIMULATOR</h1>
+        <div class="hero-tag">AUTOMATA SIMULATOR · MEALY MOORE CONVERSION</div>
+        <h1>AUTOMATABRIDGE</h1>
         <p>
-            Design, convert, and compare Mealy and Moore machines
-            through interactive transition tables and state diagrams.
+            Design, convert, and compare Mealy and Moore machines through interactive transition tables and state diagrams.
         </p>
     </div>
     """,
@@ -102,7 +101,7 @@ st.divider()
 if current_page == pages[0]:
 
     page_heading(
-        "PAGE 01",
+        
         "Machine Configuration",
         "Define the machine type, states, alphabets, and initial state.",
     )
@@ -154,7 +153,6 @@ if current_page == pages[0]:
 elif current_page == pages[1]:
 
     page_heading(
-        "PAGE 02",
         "Machine Comparison",
         "Edit the original machine, convert it, and compare both machines.",
     )
@@ -322,7 +320,7 @@ elif current_page == pages[1]:
 else:
 
     page_heading(
-        "PAGE 03",
+        
         "Conversion Summary",
         "Review the machine conversion and test output equivalence.",
     )
